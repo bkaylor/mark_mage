@@ -10,65 +10,107 @@ function love.load()
         score_font = love.graphics.newFont(30),
     }
 
-    spritesheet = love.graphics.newImage("spritesheet.png")
+    spritesheet = love.graphics.newImage("Sprite-0002.png");
+
     local w = spritesheet:getWidth()
     local h = spritesheet:getHeight()
     local size = 8*4
-    quads = {
-        shield          = love.graphics.newQuad(0,        size*5,     size,   size,   w, h),
-        mark            = love.graphics.newQuad(0,        size*6,     size,   size,   w, h),
-        gate            = love.graphics.newQuad(size,     size*6,     size,   size,   w, h),
-        projectile      = love.graphics.newQuad(0,        size*7,     size/2, size/2, w, h),
-        arrow_up        = love.graphics.newQuad(0,        size*15/2,  size/2, size/2, w, h),
-        arrow_down      = love.graphics.newQuad(size/2,   size*15/2,  size/2, size/2, w, h),
-        arrow_right     = love.graphics.newQuad(size,     size*15/2,  size/2, size/2, w, h),
-        arrow_left      = love.graphics.newQuad(size*1.5, size*15/2,  size/2, size/2, w, h),
-    }
 
-    animations = {
+    sprites = {
         player_idle = {
-            size = 8*4,
-            count = 4,
-            x = 0,
-            y = 0,
-            quads = {},
-        },
-        player_cast = {
-            size = 8*4,
-            count = 4,
-            x = 0,
-            y = size,
+            type = "animation",
+            count = 5,
             quads = {},
         },
         player_walk = {
-            size = 8*4,
+            type = "animation",
+            count = 4,
+            quads = {},
+        },
+        player_cast = {
+            type = "animation",
+            count = 7,
+            quads = {},
+        },
+        enemy_idle = {
+            type = "animation",
             count = 5,
-            x = 0,
-            y = 2*size,
             quads = {},
         },
-        enemy_live = {
-            size = 8*4,
-            count = 4,
-            x = 0,
-            y = 3*size,
+        enemy_death = {
+            type = "animation",
+            count = 5,
             quads = {},
         },
-        enemy_dead = {
-            size = 8*4,
-            count = 4,
-            x = 0,
-            y = 4*size,
-            quads = {},
-        }
+        shield = {
+            type = "sprite",
+            quad = nil,
+        },
+        mark = {
+            type = "sprite",
+            quad = nil,
+        },
+        gate = {
+            type = "sprite",
+            quad = nil,
+        },
+        projectile = {
+            type = "sprite",
+            quad = nil,
+        },
+        arrow_up = {
+            type = "sprite",
+            quad = nil,
+        },
+        arrow_down = {
+            type = "sprite",
+            quad = nil,
+        },
+        arrow_right = {
+            type = "sprite",
+            quad = nil,
+        },
+        arrow_left = {
+            type = "sprite",
+            quad = nil,
+        },
     }
 
-    -- fill in the animation quad lists
-    for _, animation in pairs(animations) do
-        for index = 0, animation.count do
-            local quad = love.graphics.newQuad(animation.x + animation.size*index, animation.y, size, size, w, h)
-            table.insert(animation.quads, quad)
+    local ordered = {}
+    table.insert(ordered, "player_idle")
+    table.insert(ordered, "player_walk")
+    table.insert(ordered, "player_cast")
+    table.insert(ordered, "enemy_idle")
+    table.insert(ordered, "enemy_death")
+    table.insert(ordered, "shield")
+    table.insert(ordered, "mark")
+    table.insert(ordered, "gate")
+    table.insert(ordered, "projectile")
+    table.insert(ordered, "arrow_up")
+    table.insert(ordered, "arrow_down")
+    table.insert(ordered, "arrow_right")
+    table.insert(ordered, "arrow_left")
+
+    -- fill in the quad lists
+    local current_x = 0
+    for _, asset_name in ipairs(ordered) do
+        print("reading " .. asset_name .. " ... ")
+        local object = sprites[asset_name]
+        if object.type == "animation" then
+            for index = 0, object.count-1 do
+                local quad = love.graphics.newQuad(current_x, 0, size, size, w, h)
+                table.insert(object.quads, quad)
+                current_x = current_x + size
+            end
+        else
+            object.quad = love.graphics.newQuad(current_x, 0, size, size, w, h)
+
+            if object.quad == nil then
+                print("WARNING, " .. asset_name .. " is nil!")
+            end
+            current_x = current_x + size
         end
+
     end
 
     -- spell data
@@ -196,7 +238,7 @@ function destroy_enemy(i)
     local enemy = enemies[i]
     enemy.state = "dying"
     enemy.state_timer = 0
-    enemy.animation.state = "enemy_dead"
+    enemy.animation.state = "enemy_death"
     enemy.animation.progress = 0
     -- table.remove(enemies, i)
 end
@@ -240,7 +282,7 @@ function make_enemy()
         h = 8*4,
         speed = 100,
         animation = {
-            state = "enemy_live",
+            state = "enemy_idle",
             progress = 0,
         },
         state = "live",
@@ -470,13 +512,13 @@ function draw_arrows_at(arrows, x, y)
         local next_quad
 
         if direction == "up" then
-            next_quad = quads.arrow_up
+            next_quad = sprites["arrow_up"].quad
         elseif direction == "down" then
-            next_quad = quads.arrow_down
+            next_quad = sprites["arrow_down"].quad
         elseif direction == "right" then
-            next_quad = quads.arrow_right
+            next_quad = sprites["arrow_right"].quad
         else
-            next_quad = quads.arrow_left
+            next_quad = sprites["arrow_left"].quad
         end
 
         love.graphics.draw(spritesheet, next_quad, x+offset, y)
@@ -490,11 +532,11 @@ function love.draw()
 
     -- draw gates
     for _, gate in ipairs(gates) do 
-        love.graphics.draw(spritesheet, quads.gate, gate.x, gate.y)
+        love.graphics.draw(spritesheet, sprites["gate"].quad, gate.x, gate.y)
     end
 
     -- draw mark
-    love.graphics.draw(spritesheet, quads.mark, math.floor(player.mark.x), math.floor(player.mark.y))
+    love.graphics.draw(spritesheet, sprites["mark"].quad, math.floor(player.mark.x), math.floor(player.mark.y))
 
     if player.casting then
         -- draw line between player and mark
@@ -504,14 +546,14 @@ function love.draw()
 
     -- draw enemies
     for _, enemy in ipairs(enemies) do 
-        local animation = animations[enemy.animation.state]
+        local animation = sprites[enemy.animation.state]
         local index = (math.floor(enemy.animation.progress*12) % animation.count) + 1
         local quad = animation.quads[index]
         love.graphics.draw(spritesheet, quad, enemy.x, enemy.y)
     end
 
     -- draw player
-    local animation = animations[player.animation.state]
+    local animation = sprites[player.animation.state]
     local index = (math.floor(player.animation.progress*12) % animation.count) + 1
     local quad = animation.quads[index]
 
@@ -534,7 +576,7 @@ function love.draw()
 
     -- draw player's shield
     if player.shielded then
-        love.graphics.draw(spritesheet, quads.shield, player.x, player.y)
+        love.graphics.draw(spritesheet, sprites["shield"].quad, player.x, player.y)
     end
 
     -- draw player's cast queue
@@ -542,7 +584,7 @@ function love.draw()
 
     -- draw projectiles
     for _, projectile in ipairs(projectiles) do
-        love.graphics.draw(spritesheet, quads.projectile, projectile.x, projectile.y)
+        love.graphics.draw(spritesheet, sprites["projectile"].quad, projectile.x, projectile.y)
     end
 
     -- draw score
