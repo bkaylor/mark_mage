@@ -10,6 +10,8 @@ function love.load()
         score_font = love.graphics.newFont(30),
     }
 
+    poofs = {}
+
     spritesheet = love.graphics.newImage("Sprite-0002.png");
 
     local w = spritesheet:getWidth()
@@ -94,7 +96,6 @@ function love.load()
     -- fill in the quad lists
     local current_x = 0
     for _, asset_name in ipairs(ordered) do
-        print("reading " .. asset_name .. " ... ")
         local object = sprites[asset_name]
         if object.type == "animation" then
             for index = 0, object.count-1 do
@@ -104,10 +105,6 @@ function love.load()
             end
         else
             object.quad = love.graphics.newQuad(current_x, 0, size, size, w, h)
-
-            if object.quad == nil then
-                print("WARNING, " .. asset_name .. " is nil!")
-            end
             current_x = current_x + size
         end
 
@@ -153,14 +150,22 @@ function love.load()
             recipe = {"left", "right"},
             procedure = function()
                 local vec = get_vector_between(player, player.mark)
-                player.mark.x, player.mark.y = player.mark.x + 2*vec.x, player.mark.y + 2*vec.y
+                local x = player.mark.x + 2*vec.x
+                local y = player.mark.y + 2*vec.y
+
+                try_teleport(player.mark, x, y)
+                -- player.mark.x, player.mark.y = player.mark.x + 2*vec.x, player.mark.y + 2*vec.y
             end,
         },
         reflect_player = {
             recipe = {"right", "left"},
             procedure = function()
                 local vec = get_vector_between(player.mark, player)
-                player.x, player.y = player.x + 2*vec.x, player.y + 2*vec.y
+                local x = player.x + 2*vec.x
+                local y = player.y + 2*vec.y
+
+                try_teleport(player, x, y)
+                -- player.x, player.y = player.x + 2*vec.x, player.y + 2*vec.y
             end,
         },
         return_mark = {
@@ -227,6 +232,33 @@ function love.load()
     gates = {}
 end
 
+function try_teleport(e, x, y)
+    if x > 0 and x < (state.width - e.w) and
+       y > 0 and y < (state.height - e.h) then
+
+       local poof = {
+           source = {
+               x = e.x,
+               y = e.y,
+           },
+           destination = {
+               x = x,
+               y = y,
+           },
+           time = 0,
+       }
+
+       table.insert(poofs, poof)
+
+       e.x = x
+       e.y = y
+
+       return true
+   else
+       return false
+   end
+end
+
 function close_gate(i)
     player.score = player.score + 1
     table.remove(gates, i)
@@ -276,8 +308,6 @@ end
 
 function make_enemy()
     local enemy = {
-        x = love.math.random(state.width), 
-        y = love.math.random(state.height), 
         w = 8*4, 
         h = 8*4,
         speed = 100,
@@ -288,17 +318,19 @@ function make_enemy()
         state = "live",
         state_timer = 0,
     }
+    enemy.x = love.math.random(state.width - enemy.w)
+    enemy.y = love.math.random(state.height - enemy.h) 
 
     table.insert(enemies, enemy)
 end
 
 function make_gate()
     local gate = {
-        x = love.math.random(state.width), 
-        y = love.math.random(state.height), 
         w = 8*4, 
         h = 8*4,
     }
+    gate.x = love.math.random(state.width - gate.w)
+    gate.y = love.math.random(state.height - gate.h)
 
     table.insert(gates, gate)
 end
