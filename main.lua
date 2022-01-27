@@ -110,11 +110,22 @@ function love.load()
 
     end
 
+    -- TODO(bkaylor): possible spell reworks
+    --   idea 1:
+    --     drag and drop to create spells
+    --     have one version of "swap", one version of "push/pull"
+    --     and you slot in nouns (player, mark, enemy, projectile) from a bank
+    --   idea 2:
+    --     spells are premade, but you assign their recipe
+    --     using some ui, maybe similar to spell_mapping_page_mockup.png
+
     -- spell data
     -- TODO(bkaylor): Slow enemies
     -- TODO(bkaylor): Slow projectiles 
     -- TODO(bkaylor): Fast player
     -- TODO(bkaylor): Reflect projectiles
+    -- TODO(bkaylor): Swap with projectile
+    -- TODO(bkaylor): Mark push/pull?
     spells = {
         projectile = {
             recipe = {"left", "left"},
@@ -154,7 +165,6 @@ function love.load()
                 local y = player.mark.y + 2*vec.y
 
                 try_teleport(player.mark, x, y)
-                -- player.mark.x, player.mark.y = player.mark.x + 2*vec.x, player.mark.y + 2*vec.y
             end,
         },
         reflect_player = {
@@ -165,7 +175,6 @@ function love.load()
                 local y = player.y + 2*vec.y
 
                 try_teleport(player, x, y)
-                -- player.x, player.y = player.x + 2*vec.x, player.y + 2*vec.y
             end,
         },
         return_mark = {
@@ -179,6 +188,8 @@ function love.load()
             procedure = function()
                 for i, gate in ipairs(gates) do
                     if collide(player.mark, gate) then
+                        -- TODO(bkaylor): Gate close could be a timer (keep mark on gate for x seconds) instead of spell
+                        --   might be better for design, makes player rely on their own movement and play around static mark
                         close_gate(i)
                     end
                 end
@@ -375,6 +386,7 @@ function love.update(dt)
     end
 
     if not player.casting then
+        -- TODO(bkaylor): moving diagonally shouldn't be faster than cardinally
         -- handle movement buttons
         player.moving = false
         if love.keyboard.isDown("w") then
@@ -405,6 +417,10 @@ function love.update(dt)
         end
 
         -- drop mark button
+        -- TODO(bkaylor): what if this was a "return mark to player" button? 
+        --   it would free up return/drop actions
+        --   but why would this deserve a dedicated button vs other spells? 
+        --   what else deserves a dedicated button?
         if love.keyboard.isDown("lctrl") then
             player.mark.held = false
         end
@@ -486,6 +502,7 @@ function love.update(dt)
 
     -- check player-enemy collision
     for _, enemy in ipairs(enemies) do
+        -- TODO(bkaylor): Improve enemy hitboxes
         if collide(player, enemy) then
             if player.shielded then
                 enemy.x, enemy.y = player.mark.x, player.mark.y
@@ -562,6 +579,8 @@ end
 function love.draw()
     love.graphics.clear()
 
+    -- TODO(bkaylor): maybe add a background?
+
     -- draw gates
     for _, gate in ipairs(gates) do 
         love.graphics.draw(spritesheet, sprites["gate"].quad, gate.x, gate.y)
@@ -618,6 +637,10 @@ function love.draw()
     for _, projectile in ipairs(projectiles) do
         love.graphics.draw(spritesheet, sprites["projectile"].quad, projectile.x, projectile.y)
     end
+
+    -- TODO(bkaylor): draw poofs?
+
+    -- TODO(bkaylor): add a key to draw hitboxes
 
     -- draw score
     love.graphics.print(player.score, state.score_font, state.width/2, 10)
