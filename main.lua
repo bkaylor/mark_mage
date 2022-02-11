@@ -1,6 +1,20 @@
 
 function love.load()
+    -- window setup
     love.window.setTitle("Mark Mage")
+    love.window.setFullscreen(true)
+
+    -- graphics setup
+    spritesheet = love.graphics.newImage("assets/graphics/markmage.png");
+
+    -- audio setup
+    sounds = {
+        scored =           love.audio.newSource("assets/sounds/scored.wav", "static"),
+        teleport =         love.audio.newSource("assets/sounds/teleport.wav", "static"),
+        failed_teleport =  love.audio.newSource("assets/sounds/failed_teleport.wav", "static"),
+        projectile_shot =  love.audio.newSource("assets/sounds/projectile_shot.wav", "static"),
+        lost_gate =        love.audio.newSource("assets/sounds/lost_gate.wav", "static"),
+    }
 
     state = {
         start_time = love.timer.getTime(),
@@ -14,8 +28,6 @@ function love.load()
     }
 
     poofs = {}
-
-    spritesheet = love.graphics.newImage("markmage.png");
 
     local w = spritesheet:getWidth()
     local h = spritesheet:getHeight()
@@ -133,6 +145,9 @@ function love.load()
         projectile = {
             recipe = {"left", "left"},
             procedure = function()
+
+                love.audio.play(sounds.projectile_shot)
+
                 local projectile = {
                     x = player.x + player.w/4,
                     y = player.y + player.h/4,
@@ -154,6 +169,8 @@ function love.load()
         swap = {
             recipe = {"up", "down"},
             procedure = function()
+                love.audio.play(sounds.teleport)
+
                 player.x, player.y, player.mark.x, player.mark.y =
                 player.mark.x, player.mark.y, player.x, player.y
             end,
@@ -244,6 +261,8 @@ function try_teleport(e, x, y)
     if x > 0 and x < (state.width - e.w) and
        y > 0 and y < (state.height - e.h) then
 
+       love.audio.play(sounds.teleport)
+
        local poof = {
            source = {
                x = e.x,
@@ -263,6 +282,7 @@ function try_teleport(e, x, y)
 
        return true
    else
+       love.audio.play(sounds.failed_teleport)
        return false
    end
 end
@@ -271,8 +291,13 @@ function begin_close_gate(i)
     gates[i].closing = true
 end
 
-function destroy_enemy(i)
+function increase_score()
     player.score = player.score + 1
+    love.audio.play(sounds.scored)
+end
+
+function destroy_enemy(i)
+    increase_score()
 
     local enemy = enemies[i]
     enemy.state = "dying"
@@ -542,10 +567,12 @@ function love.update(dt)
             if collide(player.mark, gate) then
                 gate.timer = gate.timer - dt
                 if gate.timer <= 0 then
-                    player.score = player.score + 1
+                    increase_score()
                     table.remove(gates, i)
                 end
             else
+                love.audio.play(sounds.lost_gate)
+
                 gate.timer = 3
                 gate.closing = false
             end
