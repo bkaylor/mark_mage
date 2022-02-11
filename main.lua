@@ -7,6 +7,7 @@ function love.load()
         height = love.graphics.getHeight(),
         pressed = {},
         show_spellbook = false,
+        show_hitboxes = false,
         score_font = love.graphics.newFont(30),
     }
 
@@ -135,6 +136,12 @@ function love.load()
                     y = player.y + player.h/4,
                     w = 8*2,
                     h = 8*2,
+                    hitbox = {
+                        x_offset = 2,
+                        y_offset = 2,
+                        w = 8*2-4,
+                        h = 8*2-4,
+                    },
                     direction = get_normalized_vector_between(player.mark, player),
                     speed = 300,
                 }
@@ -177,20 +184,13 @@ function love.load()
                 try_teleport(player, x, y)
             end,
         },
-        return_mark = {
-            recipe = {"left", "right", "down"},
-            procedure = function()
-                player.mark.held = true
-            end,
-        },
         send = {
             recipe = {"right", "right"},
             procedure = function()
                 for i, gate in ipairs(gates) do
                     if collide(player.mark, gate) then
-                        -- TODO(bkaylor): Gate close could be a timer (keep mark on gate for x seconds) instead of spell
-                        --   might be better for design, makes player rely on their own movement and play around static mark
-                        close_gate(i)
+                        -- start the gate's close timer
+                        begin_close_gate(i)
                     end
                 end
             end,
@@ -217,16 +217,28 @@ function love.load()
         y = state.height/2, 
         w = 8*4, 
         h = 8*4,
+        hitbox = {
+            x_offset = 4, 
+            y_offset = 0, 
+            w = 8*3, 
+            h = 8*4,
+        },
         speed = 100,
         casting = false,
         cast_queue = {},
         shielded = false,
         mark = {
             held = true,
-            x = 0,
-            y = 0,
+            x = state.width/2,
+            y = state.height/2,
             w = 8*4,
             h = 8*4,
+            hitbox = {
+                x_offset = 0,
+                y_offset = 0,
+                w = 8*4,
+                h = 8*4,
+            },
         },
         score = 0,
         animation = {
@@ -270,9 +282,8 @@ function try_teleport(e, x, y)
    end
 end
 
-function close_gate(i)
-    player.score = player.score + 1
-    table.remove(gates, i)
+function begin_close_gate(i)
+    gates[i].closing = true
 end
 
 function destroy_enemy(i)
@@ -312,15 +323,42 @@ function restart()
     love.load()
 end
 
-function collide(a, b)
+function collide_old(a, b)
     return a.x < b.x + b.w and a.x + a.w > b.x and 
            a.y < b.y + b.h and a.h + a.y > b.y 
+end
+
+function collide(a_orig, b_orig)
+    a = {
+        x = a_orig.x + a_orig.hitbox.x_offset,
+        y = a_orig.y + a_orig.hitbox.y_offset,
+        w = a_orig.hitbox.w,
+        h = a_orig.hitbox.h,
+    }
+
+    b = {
+        x = b_orig.x + b_orig.hitbox.x_offset,
+        y = b_orig.y + b_orig.hitbox.y_offset,
+        w = b_orig.hitbox.w,
+        h = b_orig.hitbox.h,
+    }
+
+    return a.x < b.x + b.w and 
+           a.x + a.w > b.x and 
+           a.y < b.y + b.h and 
+           a.h + a.y > b.y 
 end
 
 function make_enemy()
     local enemy = {
         w = 8*4, 
         h = 8*4,
+        hitbox = {
+            x_offset = 8,
+            y_offset = 0,
+            w = 8*2, 
+            h = 8*4,
+        },
         speed = 100,
         animation = {
             state = "enemy_idle",
@@ -329,6 +367,7 @@ function make_enemy()
         state = "live",
         state_timer = 0,
     }
+
     enemy.x = love.math.random(state.width - enemy.w)
     enemy.y = love.math.random(state.height - enemy.h) 
 
@@ -339,9 +378,18 @@ function make_gate()
     local gate = {
         w = 8*4, 
         h = 8*4,
+        timer = 3.0,
+        closing = false
     }
     gate.x = love.math.random(state.width - gate.w)
     gate.y = love.math.random(state.height - gate.h)
+
+    gate.hitbox = {
+        x_offset = 0,
+        y_offset = 0,
+        w = 8*4, 
+        h = 8*4,
+    }
 
     table.insert(gates, gate)
 end
@@ -372,6 +420,16 @@ function pressed(key)
     return state.pressed[key]
 end
 
+function spawn_gameplay_event()
+    if love.math.random(2) == 1 then
+        make_enemy()
+    else
+        make_gate()
+    end
+
+    state.last_spawn_time = love.timer.getTime()
+end
+
 function love.update(dt)
     if love.keyboard.isDown("escape") then
         love.event.quit()
@@ -381,8 +439,18 @@ function love.update(dt)
         restart()
     end
 
+    -- toggle spellbook
     if pressed("b") then
         state.show_spellbook = not state.show_spellbook
+    end
+
+    if pressed("h") then
+        state.show_hitboxes = not state.show_hitboxes
+    end
+
+    -- spawn something
+    if pressed("n") then
+        spawn_gameplay_event()
     end
 
     if not player.casting then
@@ -416,13 +484,10 @@ function love.update(dt)
             player.casting = true
         end
 
-        -- drop mark button
-        -- TODO(bkaylor): what if this was a "return mark to player" button? 
-        --   it would free up return/drop actions
-        --   but why would this deserve a dedicated button vs other spells? 
-        --   what else deserves a dedicated button?
+        -- return mark button
         if love.keyboard.isDown("lctrl") then
-            player.mark.held = false
+            player.mark.x = player.x
+            player.mark.y = player.y
         end
     else
         -- check if a recipe has been matched
@@ -460,10 +525,6 @@ function love.update(dt)
     end
 
     -- update mark
-    if player.mark.held then
-        player.mark.x = player.x
-        player.mark.y = player.y
-    end
 
     -- update projectiles
     for i, projectile in ipairs(projectiles) do
@@ -489,10 +550,26 @@ function love.update(dt)
 
     end
 
+    -- update gates
+    for i, gate in ipairs(gates) do
+        if gate.closing then 
+            -- verify mark is still there
+            if collide(player.mark, gate) then
+                gate.timer = gate.timer - dt
+                if gate.timer <= 0 then
+                    player.score = player.score + 1
+                    table.remove(gates, i)
+                end
+            else
+                gate.timer = 3
+                gate.closing = false
+            end
+        end
+    end
+
     -- check projectile-enemy collision
     for i, projectile in ipairs(projectiles) do
         for j, enemy in ipairs(enemies) do
-            -- TODO(bkaylor): Improve projectile hitboxes
             if collide(projectile, enemy) then
                 table.remove(projectiles, i)
                 destroy_enemy(j)
@@ -502,7 +579,6 @@ function love.update(dt)
 
     -- check player-enemy collision
     for _, enemy in ipairs(enemies) do
-        -- TODO(bkaylor): Improve enemy hitboxes
         if collide(player, enemy) then
             if player.shielded then
                 enemy.x, enemy.y = player.mark.x, player.mark.y
@@ -516,13 +592,7 @@ function love.update(dt)
     -- spawn enemy or gate every some seconds
     local freq = 5
     if (love.timer.getTime() - state.last_spawn_time) > freq then
-        if love.math.random(2) == 1 then
-            make_enemy()
-        else
-            make_gate()
-        end
-
-        state.last_spawn_time = love.timer.getTime()
+        spawn_gameplay_event()
     end
 
     -- update pressed table
@@ -576,18 +646,32 @@ function draw_arrows_at(arrows, x, y)
     end
 end
 
+function draw_hitbox(thing)
+    love.graphics.setColor(255, 0, 0, 255)
+    love.graphics.rectangle("line", thing.x + thing.hitbox.x_offset, thing.y + thing.hitbox.y_offset, thing.hitbox.w, thing.hitbox.h)
+    love.graphics.reset()
+end
+
 function love.draw()
     love.graphics.clear()
 
-    -- TODO(bkaylor): maybe add a background?
+    -- TODO(bkaylor): add a background?
 
     -- draw gates
     for _, gate in ipairs(gates) do 
         love.graphics.draw(spritesheet, sprites["gate"].quad, gate.x, gate.y)
+
+        if state.show_hitboxes then
+            draw_hitbox(gate)
+        end
     end
 
     -- draw mark
     love.graphics.draw(spritesheet, sprites["mark"].quad, math.floor(player.mark.x), math.floor(player.mark.y))
+
+    if state.show_hitboxes then
+        draw_hitbox(player.mark)
+    end
 
     if player.casting then
         -- draw line between player and mark
@@ -601,6 +685,10 @@ function love.draw()
         local index = (math.floor(enemy.animation.progress*12) % animation.count) + 1
         local quad = animation.quads[index]
         love.graphics.draw(spritesheet, quad, enemy.x, enemy.y)
+
+        if state.show_hitboxes then
+            draw_hitbox(enemy)
+        end
     end
 
     -- draw player
@@ -625,6 +713,10 @@ function love.draw()
 
     love.graphics.draw(spritesheet, quad, player.x, player.y, 0, scale, 1, bump, 0)
 
+    if state.show_hitboxes then
+        draw_hitbox(player)
+    end
+
     -- draw player's shield
     if player.shielded then
         love.graphics.draw(spritesheet, sprites["shield"].quad, player.x, player.y)
@@ -636,11 +728,26 @@ function love.draw()
     -- draw projectiles
     for _, projectile in ipairs(projectiles) do
         love.graphics.draw(spritesheet, sprites["projectile"].quad, projectile.x, projectile.y)
+
+        if state.show_hitboxes then
+            draw_hitbox(projectile)
+        end
     end
 
-    -- TODO(bkaylor): draw poofs?
+    -- draw gate timers
+    love.graphics.setLineWidth(2)
+    love.graphics.setColor(0, 255, 0, 255)
+    for _, gate in ipairs(gates) do 
+        if gate.closing then
+            line_x1 = gate.x
+            line_x2 = gate.x + (gate.h * ((3.0 - gate.timer)/3.0))
+            line_y = gate.y + gate.h + 3 
+            love.graphics.line(line_x1, line_y, line_x2, line_y)
+        end
+    end
+    love.graphics.reset()
 
-    -- TODO(bkaylor): add a key to draw hitboxes
+    -- TODO(bkaylor): draw poofs?
 
     -- draw score
     love.graphics.print(player.score, state.score_font, state.width/2, 10)
