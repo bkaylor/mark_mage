@@ -1,5 +1,7 @@
 
 function love.load()
+    love.window.setTitle("Mark Mage")
+
     state = {
         start_time = love.timer.getTime(),
         last_spawn_time = love.timer.getTime(),
@@ -13,7 +15,7 @@ function love.load()
 
     poofs = {}
 
-    spritesheet = love.graphics.newImage("Sprite-0002.png");
+    spritesheet = love.graphics.newImage("markmage.png");
 
     local w = spritesheet:getWidth()
     local h = spritesheet:getHeight()
@@ -149,14 +151,6 @@ function love.load()
                 table.insert(projectiles, projectile)
             end,
         },
-        double_speed_projectiles = {
-            recipe = {"up", "right", "down", "left"},
-            procedure = function()
-                for _, projectile in ipairs(projectiles) do
-                    projectile.speed = projectile.speed * 2
-                end
-            end,
-        },
         swap = {
             recipe = {"up", "down"},
             procedure = function()
@@ -193,15 +187,6 @@ function love.load()
                         begin_close_gate(i)
                     end
                 end
-            end,
-        },
-        bfg = {
-            recipe = {"up", "up", "down", "down", "left", "right", "left", "right"},
-            procedure = function()
-                player.score = player.score + #gates
-                gates = {}
-                player.score = player.score + #enemies
-                enemies = {}
             end,
         },
         shield = {
@@ -584,12 +569,15 @@ function love.update(dt)
                 enemy.x, enemy.y = player.mark.x, player.mark.y
                 player.shielded = false
             else
+                -- TODO(bkaylor): reset screen (or health?) instead of insta-restart
                 restart()
             end
         end
     end
 
     -- spawn enemy or gate every some seconds
+    -- TODO(bkaylor): more events? more interesting groupings of events?
+    --                what if spawned encounters instead of individual things?
     local freq = 5
     if (love.timer.getTime() - state.last_spawn_time) > freq then
         spawn_gameplay_event()
