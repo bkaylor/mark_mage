@@ -2,7 +2,16 @@
 function love.load()
     -- window setup
     love.window.setTitle("Mark Mage")
-    love.window.setFullscreen(true)
+    -- love.window.setFullscreen(true)
+    love.window.setMode(1920, 1080, {
+        fullscreen = false,
+        fullscreentype = "desktop",
+        vsync = 1,
+        resizable = true,
+        borderless = true,
+    })
+
+    disable_enemies = true
 
     -- graphics setup
     spritesheet = love.graphics.newImage("assets/graphics/markmage.png");
@@ -26,8 +35,6 @@ function love.load()
         show_hitboxes = false,
         score_font = love.graphics.newFont(30),
     }
-
-    poofs = {}
 
     local w = spritesheet:getWidth()
     local h = spritesheet:getHeight()
@@ -91,6 +98,16 @@ function love.load()
             type = "sprite",
             quad = nil,
         },
+        ranged_enemy_idle = {
+            type = "animation",
+            count = 5,
+            quads = {},
+        },
+        ranged_enemy_death = {
+            type = "animation",
+            count = 5,
+            quads = {},
+        },
     }
 
     local ordered = {}
@@ -107,6 +124,8 @@ function love.load()
     table.insert(ordered, "arrow_down")
     table.insert(ordered, "arrow_right")
     table.insert(ordered, "arrow_left")
+    table.insert(ordered, "ranged_enemy_idle")
+    table.insert(ordered, "ranged_enemy_death")
 
     -- fill in the quad lists
     local current_x = 0
@@ -140,7 +159,6 @@ function love.load()
     -- TODO(bkaylor): Fast player
     -- TODO(bkaylor): Reflect projectiles
     -- TODO(bkaylor): Swap with projectile
-    -- TODO(bkaylor): Mark push/pull?
     spells = {
         projectile = {
             recipe = {"left", "left"},
@@ -160,8 +178,12 @@ function love.load()
                         h = 8*2-4,
                     },
                     direction = get_normalized_vector_between(player.mark, player),
-                    speed = 300,
+                    speed = 550,
+                    pierce = false,
                 }
+
+                projectile.x = projectile.x + projectile.direction.x*25
+                projectile.y = projectile.y + projectile.direction.y*25
 
                 table.insert(projectiles, projectile)
             end,
@@ -198,12 +220,91 @@ function love.load()
         send = {
             recipe = {"right", "right"},
             procedure = function()
+                -- define the circle around the mark
+                local mark_circle = {
+                    center = {
+                        x = player.mark.x + player.mark.w/2,
+                        y = player.mark.y + player.mark.h/2,
+                    },
+                    radius = 200,
+                }
+
+                make_send_spell_circle(mark_circle)
                 for i, gate in ipairs(gates) do
-                    if collide(player.mark, gate) then
+                    if hitbox_and_circle_collide(gate, mark_circle) then
                         -- start the gate's close timer
                         begin_close_gate(i)
                     end
                 end
+            end,
+        },
+        apply_burst = {
+            recipe = {"down", "down", "left"},
+            procedure = function()
+                -- define the circle around the mark
+                local mark_circle = {
+                    center = {
+                        x = player.mark.x + player.mark.w/2,
+                        y = player.mark.y + player.mark.h/2,
+                    },
+                    radius = 200,
+                }
+
+                make_send_spell_circle(mark_circle)
+                for i, gate in ipairs(gates) do
+                    if hitbox_and_circle_collide(gate, mark_circle) then
+                        -- change gate type
+                        gate.type = "spread"
+                    end
+                end
+            end,
+        },
+        apply_pierce = {
+            recipe = {"down", "down", "right"},
+            procedure = function()
+                -- define the circle around the mark
+                local mark_circle = {
+                    center = {
+                        x = player.mark.x + player.mark.w/2,
+                        y = player.mark.y + player.mark.h/2,
+                    },
+                    radius = 200,
+                }
+
+                make_send_spell_circle(mark_circle)
+                for i, gate in ipairs(gates) do
+                    if hitbox_and_circle_collide(gate, mark_circle) then
+                        -- change gate type
+                        gate.type = "pierce"
+                    end
+                end
+            end,
+        },
+        apply_size = {
+            recipe = {"down", "down", "up"},
+            procedure = function()
+                -- define the circle around the mark
+                local mark_circle = {
+                    center = {
+                        x = player.mark.x + player.mark.w/2,
+                        y = player.mark.y + player.mark.h/2,
+                    },
+                    radius = 200,
+                }
+
+                make_send_spell_circle(mark_circle)
+                for i, gate in ipairs(gates) do
+                    if hitbox_and_circle_collide(gate, mark_circle) then
+                        -- change gate type
+                        gate.type = "size"
+                    end
+                end
+            end,
+        },
+        stop_mark = {
+            recipe = {"up", "up", "up"},
+            procedure = function()
+                player.mark.moving = false
             end,
         },
         shield = {
@@ -211,7 +312,51 @@ function love.load()
             procedure = function()
                 player.shielded = true
             end,
-        }
+        },
+        push = {
+            recipe = {"up", "right", "down"},
+            procedure = function()
+                player.mark.moving = true
+
+                -- get push destination
+                local vec_between = get_vector_between(player.mark, player)
+                local stretched = set_length_of_vec2(vec_between, 500)
+                local new_x = player.mark.x + stretched.x
+                local new_y = player.mark.y + stretched.y
+
+                player.mark.movement = {
+                    start = {x=player.mark.x, y=player.mark.y},
+                    finish = {x=new_x, y=new_y},
+                    progress = 0,
+                    timer = 0,
+                    max_timer = 2.0,
+                }
+
+                player.mark.movement.timer = player.mark.movement.timer
+            end,
+        },
+        pull = {
+            recipe = {"up", "left", "down"},
+            procedure = function()
+                player.mark.moving = true
+
+                -- get push destination
+                local vec_between = get_vector_between(player.mark, player)
+                local stretched = set_length_of_vec2(vec_between, 500)
+                local new_x = player.mark.x - stretched.x
+                local new_y = player.mark.y - stretched.y
+
+                player.mark.movement = {
+                    start = {x=player.mark.x, y=player.mark.y},
+                    finish = {x=new_x, y=new_y},
+                    progress = 0,
+                    timer = 0,
+                    max_timer = 2.0,
+                }
+
+                player.mark.movement.timer = player.mark.movement.timer
+            end,
+        },
     }
 
     player = {
@@ -241,6 +386,14 @@ function love.load()
                 w = 8*4,
                 h = 8*4,
             },
+            moving = false,
+            movement = {
+                start = {x=0, y=0},
+                finish = {x=0, y=0},
+                progress = 0,
+                timer = 0,
+                max_timer = 3.0,
+            }
         },
         score = 0,
         animation = {
@@ -255,6 +408,85 @@ function love.load()
     projectiles = {}
 
     gates = {}
+
+    poofs = {}
+
+    send_circles = {}
+end
+
+function make_projectile(x, y, direction)
+    love.audio.play(sounds.projectile_shot)
+
+    local projectile = {
+        x = x,
+        y = y,
+        w = 8*2,
+        h = 8*2,
+        hitbox = {
+            x_offset = 2,
+            y_offset = 2,
+            w = 8*2-4,
+            h = 8*2-4,
+        },
+        direction = direction,
+        speed = 550,
+        pierce = false,
+    }
+
+    table.insert(projectiles, projectile)
+end
+
+function enemy_shoot_projectile(enemy)
+    love.audio.play(sounds.projectile_shot)
+
+    local projectile = {
+        x = enemy.x + enemy.w/4,
+        y = enemy.y + enemy.h/4,
+        w = 8*2,
+        h = 8*2,
+        hitbox = {
+            x_offset = 2,
+            y_offset = 2,
+            w = 8*2-4,
+            h = 8*2-4,
+        },
+        direction = get_normalized_vector_between(player, enemy),
+        speed = 550,
+        pierce = false,
+    }
+
+    projectile.x = projectile.x + projectile.direction.x*25
+    projectile.y = projectile.y + projectile.direction.y*25
+
+    table.insert(projectiles, projectile)
+end
+
+function normalize_vec2(a)
+    local scale = math.sqrt(a.x*a.x + a.y*a.y)
+    local result = {x=a.x/scale, y=a.y/scale}
+    return result 
+end
+
+function set_length_of_vec2(a, scale)
+    local unit = normalize_vec2(a)
+    local result = {x=unit.x*scale, y=unit.y*scale}
+    return result
+end
+
+function lerp(t, a, b)
+    return a + (b-a)*t
+end
+
+function easeInOutQuart(t, a, b)
+    value = 0
+
+    if t < 0.5 then
+        value = 8*t*t*t*t
+    else
+        value = 1 - (((-2*t + 2)^4)/2)
+    end
+
+    return a + (b-a)*value
 end
 
 function try_teleport(e, x, y)
@@ -302,7 +534,11 @@ function destroy_enemy(i)
     local enemy = enemies[i]
     enemy.state = "dying"
     enemy.state_timer = 0
-    enemy.animation.state = "enemy_death"
+    if enemy.type == "ranged" then
+        enemy.animation.state = "ranged_enemy_death"
+    else
+        enemy.animation.state = "enemy_death"
+    end
     enemy.animation.progress = 0
     -- table.remove(enemies, i)
 end
@@ -327,6 +563,30 @@ function get_normalized_vector_between(a, b)
     vec.y = vec.y / length
 
     return vec
+end
+
+function normalize(a)
+    local length = math.sqrt(a.x * a.x + a.y * a.y)
+    a.x = a.x / length
+    a.y = a.y / length
+
+    return a
+end
+
+function make_send_spell_circle(circle)
+    local circle_info = {
+        center = {
+            x = circle.center.x,
+            y = circle.center.y,
+        },
+        radius = circle.radius,
+        timer = 0,
+        timer_max = 2.0,
+    }
+
+    circle_info.timer = circle_info.timer_max
+
+    table.insert(send_circles, circle_info)
 end
 
 function restart()
@@ -359,6 +619,65 @@ function collide(a_orig, b_orig)
            a.h + a.y > b.y 
 end
 
+function hitbox_and_circle_collide(thing, circle)
+    local corner1 = {
+        x = thing.x + thing.hitbox.x_offset,
+        y = thing.y + thing.hitbox.y_offset,
+    }
+
+    local corner2 = {
+        x = thing.x + thing.hitbox.x_offset + thing.hitbox.w,
+        y = thing.y + thing.hitbox.y_offset,
+    }
+
+    local corner3 = {
+        x = thing.x + thing.hitbox.x_offset,
+        y = thing.y + thing.hitbox.y_offset + thing.hitbox.h,
+    }
+
+    local corner4 = {
+        x = thing.x + thing.hitbox.x_offset + thing.hitbox.w,
+        y = thing.y + thing.hitbox.y_offset + thing.hitbox.h,
+    }
+
+    local corners = {corner1, corner2, corner3, corner4}
+
+    for _, corner in ipairs(corners) do
+        local x_part = corner.x - circle.center.x
+        local y_part = corner.y - circle.center.y
+        local distance = math.sqrt(x_part^2 + y_part^2)
+        if distance < circle.radius then
+            return true
+        end
+    end
+
+    return false
+end
+
+function make_enemy_at(x, y)
+    local enemy = {
+        x = x,
+        y = y,
+        w = 8*4, 
+        h = 8*4,
+        hitbox = {
+            x_offset = 8,
+            y_offset = 0,
+            w = 8*2, 
+            h = 8*4,
+        },
+        speed = 100,
+        animation = {
+            state = "enemy_idle",
+            progress = 0,
+        },
+        state = "live",
+        state_timer = 0,
+    }
+
+    table.insert(enemies, enemy)
+end
+
 function make_enemy()
     local enemy = {
         w = 8*4, 
@@ -384,12 +703,62 @@ function make_enemy()
     table.insert(enemies, enemy)
 end
 
+function make_ranged_enemy()
+    local enemy = {
+        w = 8*4, 
+        h = 8*4,
+        hitbox = {
+            x_offset = 8,
+            y_offset = 0,
+            w = 8*2, 
+            h = 8*4,
+        },
+        speed = 100,
+        animation = {
+            state = "ranged_enemy_idle",
+            progress = 0,
+        },
+        state = "live",
+        state_timer = 0,
+        cooldown_timer = 0,
+        type = "ranged",
+    }
+
+    enemy.x = love.math.random(state.width - enemy.w)
+    enemy.y = love.math.random(state.height - enemy.h) 
+
+    table.insert(enemies, enemy)
+end
+
+function make_gate_at(x, y)
+    local gate = {
+        x = x,
+        y = y,
+        w = 8*4, 
+        h = 8*4,
+        timer = 3.0,
+        closing = false,
+        type = "normal",
+        modifier_active = false,
+    }
+    gate.hitbox = {
+        x_offset = 0,
+        y_offset = 0,
+        w = 8*4, 
+        h = 8*4,
+    }
+
+    table.insert(gates, gate)
+end
+
 function make_gate()
     local gate = {
         w = 8*4, 
         h = 8*4,
         timer = 3.0,
-        closing = false
+        closing = false,
+        type = "normal",
+        modifier_active = false,
     }
     gate.x = love.math.random(state.width - gate.w)
     gate.y = love.math.random(state.height - gate.h)
@@ -430,12 +799,66 @@ function pressed(key)
     return state.pressed[key]
 end
 
+function randomly_place_rect_in_rect(r1, r2)
+    -- this function sets r1.x and r1.y such that r1 is inside r2
+    r1.x = r2.x + love.math.random(r2.w - r1.w)
+    r1.y = r2.y + love.math.random(r2.h - r1.h)
+
+    return r1
+end
+
 function spawn_gameplay_event()
-    if love.math.random(2) == 1 then
-        make_enemy()
-    else
-        make_gate()
+    local encounters = {
+            function()
+                make_enemy()
+            end,
+
+            function()
+                make_ranged_enemy()
+            end,
+
+            function()
+                make_gate()
+            end,
+
+            -- this is really weird and bad and buggy!
+            function()
+                local event_rect = {
+                    w = 300,
+                    h = 300,
+                }
+
+                event_rect = randomly_place_rect_in_rect(event_rect, {x=0,y=0,w=state.width,h=state.height})
+                e1 = {w=8*4, h=8*4}
+                e2 = {w=8*4, h=8*4}
+                e3 = {w=8*4, h=8*4}
+                e1 = randomly_place_rect_in_rect(e1, event_rect)
+                e2 = randomly_place_rect_in_rect(e2, event_rect)
+                e3 = randomly_place_rect_in_rect(e3, event_rect)
+                make_enemy_at(e1.x, e1.y)
+                make_enemy_at(e2.x, e2.y)
+                make_enemy_at(e3.x, e3.y)
+                make_gate_at(event_rect.x + event_rect.w/2, event_rect.y + event_rect.h/2)
+            end,
+    }
+
+    if disable_enemies then
+        local encounters_easy = {
+            encounters[3],
+        }
+
+        encounters = encounters_easy
     end
+
+    encounters[love.math.random(#encounters)]()
+
+    -- local seed = love.math.random(3)
+    -- if seed == 1 then
+    --     make_enemy()
+    -- else if seed == 2 then
+    --     make_gate()
+    -- else if seed == 3 then
+    -- end
 
     state.last_spawn_time = love.timer.getTime()
 end
@@ -535,6 +958,19 @@ function love.update(dt)
     end
 
     -- update mark
+    if player.mark.moving then
+        if player.mark.movement.timer > player.mark.movement.max_timer then
+            -- end the movement
+            player.mark.moving = false
+        end
+
+        local progress = player.mark.movement.timer / player.mark.movement.max_timer
+
+        player.mark.x = easeInOutQuart(progress, player.mark.movement.start.x, player.mark.movement.finish.x)
+        player.mark.y = easeInOutQuart(progress, player.mark.movement.start.y, player.mark.movement.finish.y)
+
+        player.mark.movement.timer = player.mark.movement.timer + dt
+    end
 
     -- update projectiles
     for i, projectile in ipairs(projectiles) do
@@ -551,9 +987,17 @@ function love.update(dt)
                 table.remove(enemies, index)
             end
         else
-            local vec = get_normalized_vector_between(player, enemy)
-            enemy.x = enemy.x + vec.x * enemy.speed * dt
-            enemy.y = enemy.y + vec.y * enemy.speed * dt
+            if enemy.type == "ranged" then
+                if enemy.cooldown_timer <= 0 then
+                    enemy_shoot_projectile(enemy)
+                    enemy.cooldown_timer = 3.0
+                end
+                enemy.cooldown_timer = enemy.cooldown_timer - dt
+            else
+                local vec = get_normalized_vector_between(player, enemy)
+                enemy.x = enemy.x + vec.x * enemy.speed * dt
+                enemy.y = enemy.y + vec.y * enemy.speed * dt
+            end
         end
 
         enemy.animation.progress = enemy.animation.progress + dt
@@ -561,14 +1005,29 @@ function love.update(dt)
     end
 
     -- update gates
+    local mark_circle = {
+        center = {
+            x = player.mark.x + player.mark.w/2,
+            y = player.mark.y + player.mark.h/2,
+        },
+        radius = 300,
+    }
+
     for i, gate in ipairs(gates) do
         if gate.closing then 
             -- verify mark is still there
-            if collide(player.mark, gate) then
+            if hitbox_and_circle_collide(gate, mark_circle) then
                 gate.timer = gate.timer - dt
                 if gate.timer <= 0 then
-                    increase_score()
-                    table.remove(gates, i)
+                    -- TODO(bkaylor): instead of removing, change to become a projectile modifier
+                    if gate.type == normal then
+                        increase_score()
+                        table.remove(gates, i)
+                    else
+                        gate.modifier_active = true
+                        gate.closing = false
+                        gate.timer = 3
+                    end
                 end
             else
                 love.audio.play(sounds.lost_gate)
@@ -579,12 +1038,51 @@ function love.update(dt)
         end
     end
 
+    -- update send circles
+    for i, circle in ipairs(send_circles) do
+        if circle.timer <= 0 then
+            table.remove(send_circles, i)
+        end
+
+        circle.timer = circle.timer - dt
+    end
+
     -- check projectile-enemy collision
     for i, projectile in ipairs(projectiles) do
         for j, enemy in ipairs(enemies) do
             if collide(projectile, enemy) then
-                table.remove(projectiles, i)
+                if not projectile.pierce then
+                    table.remove(projectiles, i)
+                end
+
                 destroy_enemy(j)
+            end
+        end
+    end
+
+    -- check projectile-gate collision
+    for i, projectile in ipairs(projectiles) do
+        for j, gate in ipairs(gates) do
+            if collide(projectile, gate) and gate.modifier_active then
+                -- modify projectile (spawn new projectiles?) based on type of gate
+                if gate.type == "size" then
+                    local multiplier = 2
+                    -- projectile.x = projectile.x - projectile.w/multiplier
+                    -- projectile.y = projectile.y - projectile.h/multiplier
+                    projectile.w = projectile.w * multiplier 
+                    projectile.h = projectile.h * multiplier
+                    projectile.hitbox.w = projectile.hitbox.w * multiplier 
+                    projectile.hitbox.h = projectile.hitbox.h * multiplier
+                elseif gate.type == "spread" then
+                    make_projectile(projectile.x, projectile.y, normalize({x=1,y=1}))
+                    make_projectile(projectile.x, projectile.y, normalize({x=-1,y=1}))
+                    make_projectile(projectile.x, projectile.y, normalize({x=1,y=-1}))
+                    make_projectile(projectile.x, projectile.y, normalize({x=-1,y=-1}))
+                elseif gate.type == "pierce" then
+                    projectile.pierce = true
+                end
+
+                gate.modifier_active = false
             end
         end
     end
@@ -602,12 +1100,29 @@ function love.update(dt)
         end
     end
 
+    -- check player-projectile collission
+    for i, projectile in ipairs(projectiles) do
+        if collide(player, projectile) then
+            if player.shielded then
+                projectile.x, projectile.y = player.mark.x, player.mark.y
+                player.shielded = false
+            else
+                -- TODO(bkaylor): reset screen (or health?) instead of insta-restart
+                restart()
+            end
+        end
+    end
+
     -- spawn enemy or gate every some seconds
     -- TODO(bkaylor): more events? more interesting groupings of events?
     --                what if spawned encounters instead of individual things?
     local freq = 5
     if (love.timer.getTime() - state.last_spawn_time) > freq then
         spawn_gameplay_event()
+        freq = freq - 0.5 
+        if freq < 0.5 then
+            freq = 0.5
+        end
     end
 
     -- update pressed table
@@ -670,11 +1185,33 @@ end
 function love.draw()
     love.graphics.clear()
 
-    -- TODO(bkaylor): add a background?
+    -- draw background
+    love.graphics.setColor(100, 255, 255, 0.1)
+    for x=0, state.width, 100 do
+        love.graphics.line(x, 0, x, state.height)
+    end
+    for y=0, state.height, 100 do
+        love.graphics.line(0, y, state.width, y)
+    end
+    love.graphics.reset()
 
     -- draw gates
     for _, gate in ipairs(gates) do 
+        if gate.type == "size" then
+            love.graphics.setColor(255, 0, 0, 255)
+        elseif gate.type == "spread" then
+            love.graphics.setColor(0, 255, 0, 255)
+        elseif gate.type == "pierce" then
+            love.graphics.setColor(0, 0, 255, 255)
+        end
+
         love.graphics.draw(spritesheet, sprites["gate"].quad, gate.x, gate.y)
+
+        love.graphics.reset()
+
+        if gate.modifier_active then
+            love.graphics.circle("line", gate.x + gate.w/2, gate.y + gate.h/2, gate.w/2)
+        end
 
         if state.show_hitboxes then
             draw_hitbox(gate)
@@ -692,6 +1229,16 @@ function love.draw()
         -- draw line between player and mark
         love.graphics.line(player.x+player.w/2, player.y+player.h/2, 
                            player.mark.x+player.mark.w/2, player.mark.y+player.mark.h/2)
+    end
+
+    -- draw send circles
+    for _, circle in ipairs(send_circles) do
+        local greyscale = (circle.timer / circle.timer_max)
+        greyscale = greyscale * greyscale
+
+        love.graphics.setColor(10, 10, 10, greyscale)
+        love.graphics.circle("line", circle.center.x, circle.center.y, circle.radius)
+        love.graphics.reset()
     end
 
     -- draw enemies
@@ -742,7 +1289,7 @@ function love.draw()
 
     -- draw projectiles
     for _, projectile in ipairs(projectiles) do
-        love.graphics.draw(spritesheet, sprites["projectile"].quad, projectile.x, projectile.y)
+        love.graphics.draw(spritesheet, sprites["projectile"].quad, projectile.x, projectile.y, projectile.w/16, projectile.h/16)
 
         if state.show_hitboxes then
             draw_hitbox(projectile)
@@ -750,14 +1297,40 @@ function love.draw()
     end
 
     -- draw gate timers
-    love.graphics.setLineWidth(2)
-    love.graphics.setColor(0, 255, 0, 255)
+    -- love.graphics.setLineWidth(2)
+    -- love.graphics.setColor(0, 255, 0, 255)
+    -- for _, gate in ipairs(gates) do 
+    --     if gate.closing then
+    --         line_x1 = gate.x
+    --         line_x2 = gate.x + (gate.h * ((3.0 - gate.timer)/3.0))
+    --         line_y = gate.y + gate.h + 3 
+    --         love.graphics.line(line_x1, line_y, line_x2, line_y)
+    --     end
+    -- end
+    -- love.graphics.reset()
+    
+    -- draw connecting and progress lines
+    love.graphics.setLineWidth(1)
     for _, gate in ipairs(gates) do 
         if gate.closing then
-            line_x1 = gate.x
-            line_x2 = gate.x + (gate.h * ((3.0 - gate.timer)/3.0))
-            line_y = gate.y + gate.h + 3 
-            love.graphics.line(line_x1, line_y, line_x2, line_y)
+            -- draw connecting lines
+            love.graphics.setColor(255, 0, 0, 255)
+            local x1 = player.mark.x + player.mark.w/2
+            local y1 = player.mark.y + player.mark.h/2
+            local x2 = gate.x + gate.w/2
+            local y2 = gate.y + gate.h/2
+            love.graphics.line(x1, y1, x2, y2)
+
+            -- draw progress lines
+            love.graphics.setColor(0, 255, 0, 255)
+            local x1 = player.mark.x + player.mark.w/2
+            local y1 = player.mark.y + player.mark.h/2
+            local vec = get_vector_between(gate, player.mark)
+            vec.x = vec.x * ((3.0 - gate.timer)/3.0)
+            vec.y = vec.y * ((3.0 - gate.timer)/3.0)
+            local x2 = x1 + vec.x
+            local y2 = y1 + vec.y
+            love.graphics.line(x1, y1, x2, y2)
         end
     end
     love.graphics.reset()
@@ -767,8 +1340,20 @@ function love.draw()
     -- draw score
     love.graphics.print(player.score, state.score_font, state.width/2, 10)
 
+    -- draw debug stuff
+    if false then
+        local x = 100 
+        local y = 20
+        local y_increment = 20
+        for _, circle in ipairs(send_circles) do
+            love.graphics.print(circle.center.x .. "," .. circle.center.y .. " " .. circle.radius, x, y)
+
+            y = y + y_increment
+        end
+    end
+
+    -- draw spellbook
     if state.show_spellbook then
-        -- draw spellbook
         local x = 10
         local y = 20
         local y_increment = 20
@@ -779,6 +1364,41 @@ function love.draw()
             draw_arrows_at(spell_data.recipe, x, y)
             y = y + y_increment
         end
+    end
+
+    -- if spellbook is open, also draw various spell guides
+    if state.show_spellbook then
+        -- projectile
+        love.graphics.setColor(10, 10, 10, 0.1)
+        local player_center = {x = player.x + player.w/2, y = player.y + player.h/2}
+        local mark_center = {x = player.mark.x + player.mark.w/2, y = player.mark.y + player.mark.h/2}
+        local vec = get_normalized_vector_between(player_center, mark_center)
+        vec.x = vec.x * 10000
+        vec.y = vec.y * 10000
+        love.graphics.line(player_center.x, player_center.y, player_center.x - vec.x, player_center.y - vec.y)
+        love.graphics.reset()
+        -- swap
+        -- reflect mark
+        love.graphics.setColor(10, 10, 10, 0.1)
+        local player_center = {x = player.x + player.w/2, y = player.y + player.h/2}
+        local mark_center = {x = player.mark.x + player.mark.w/2, y = player.mark.y + player.mark.h/2}
+        local vec = get_vector_between(player_center, mark_center)
+        local circle = {x = mark_center.x + 2*vec.x, y = mark_center.y + 2*vec.y, radius=10}
+        love.graphics.circle("fill", circle.x, circle.y, circle.radius)
+        love.graphics.reset()
+        -- reflect player
+        love.graphics.setColor(10, 10, 10, 0.1)
+        local player_center = {x = player.x + player.w/2, y = player.y + player.h/2}
+        local mark_center = {x = player.mark.x + player.mark.w/2, y = player.mark.y + player.mark.h/2}
+        local vec = get_vector_between(mark_center, player_center)
+        local circle = {x = player_center.x + 2*vec.x, y = player_center.y + 2*vec.y, radius=10}
+        love.graphics.circle("fill", circle.x, circle.y, circle.radius)
+        love.graphics.reset()
+        -- send
+        -- stop_mark
+        -- shield
+        -- push
+        -- pull
     end
 end
 
