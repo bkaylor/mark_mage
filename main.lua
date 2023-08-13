@@ -8,10 +8,10 @@ function love.load()
         fullscreentype = "desktop",
         vsync = 1,
         resizable = true,
-        borderless = true,
+        borderless = false,
     })
 
-    disable_enemies = true
+    disable_enemies = false 
 
     -- graphics setup
     spritesheet = love.graphics.newImage("assets/graphics/markmage.png");
@@ -45,6 +45,10 @@ function love.load()
             type = "animation",
             count = 5,
             quads = {},
+        },
+        player_death = {
+            type = "sprite",
+            quad = nil,
         },
         player_walk = {
             type = "animation",
@@ -112,6 +116,7 @@ function love.load()
 
     local ordered = {}
     table.insert(ordered, "player_idle")
+    table.insert(ordered, "player_death")
     table.insert(ordered, "player_walk")
     table.insert(ordered, "player_cast")
     table.insert(ordered, "enemy_idle")
@@ -359,59 +364,7 @@ function love.load()
         },
     }
 
-    player = {
-        x = state.width/2, 
-        y = state.height/2, 
-        w = 8*4, 
-        h = 8*4,
-        hitbox = {
-            x_offset = 4, 
-            y_offset = 0, 
-            w = 8*3, 
-            h = 8*4,
-        },
-        speed = 100,
-        casting = false,
-        cast_queue = {},
-        shielded = false,
-        mark = {
-            held = true,
-            x = state.width/2,
-            y = state.height/2,
-            w = 8*4,
-            h = 8*4,
-            hitbox = {
-                x_offset = 0,
-                y_offset = 0,
-                w = 8*4,
-                h = 8*4,
-            },
-            moving = false,
-            movement = {
-                start = {x=0, y=0},
-                finish = {x=0, y=0},
-                progress = 0,
-                timer = 0,
-                max_timer = 3.0,
-            }
-        },
-        score = 0,
-        animation = {
-            state = "player_idle",
-            progress = 0,
-        },
-        facing = "right"
-    }
-
-    enemies = {}
-
-    projectiles = {}
-
-    gates = {}
-
-    poofs = {}
-
-    send_circles = {}
+    initialize_state()
 end
 
 function make_projectile(x, y, direction)
@@ -524,8 +477,10 @@ function begin_close_gate(i)
 end
 
 function increase_score()
-    player.score = player.score + 1
-    love.audio.play(sounds.scored)
+    if player.health > 0 then
+        player.score = player.score + 1
+        love.audio.play(sounds.scored)
+    end
 end
 
 function destroy_enemy(i)
@@ -589,8 +544,66 @@ function make_send_spell_circle(circle)
     table.insert(send_circles, circle_info)
 end
 
-function restart()
-    love.load()
+function initialize_state()
+    player = {
+        x = state.width/2, 
+        y = state.height/2, 
+        w = 8*4, 
+        h = 8*4,
+        hitbox = {
+            x_offset = 4, 
+            y_offset = 0, 
+            w = 8*3, 
+            h = 8*4,
+        },
+        speed = 100,
+        casting = false,
+        cast_queue = {},
+        shielded = false,
+        mark = {
+            held = true,
+            x = state.width/2,
+            y = state.height/2,
+            w = 8*4,
+            h = 8*4,
+            speed = 400,
+            hitbox = {
+                x_offset = 0,
+                y_offset = 0,
+                w = 8*4,
+                h = 8*4,
+            },
+            moving = false,
+            movement = {
+                start = {x=0, y=0},
+                finish = {x=0, y=0},
+                progress = 0,
+                timer = 0,
+                max_timer = 3.0,
+            }
+        },
+        score = 0,
+        animation = {
+            state = "player_idle",
+            progress = 0,
+        },
+        facing = "right",
+        health = 1,
+    }
+
+    enemies = {}
+
+    projectiles = {}
+
+    gates = {}
+
+    poofs = {}
+
+    send_circles = {}
+end
+
+function player_hit()
+    player.health = player.health - 1
 end
 
 function collide_old(a, b)
@@ -869,7 +882,7 @@ function love.update(dt)
     end
 
     if love.keyboard.isDown("r") then
-        restart()
+        initialize_state()
     end
 
     -- toggle spellbook
@@ -886,73 +899,79 @@ function love.update(dt)
         spawn_gameplay_event()
     end
 
-    if not player.casting then
-        -- TODO(bkaylor): moving diagonally shouldn't be faster than cardinally
-        -- handle movement buttons
-        player.moving = false
-        if love.keyboard.isDown("w") then
-            player.y = player.y - (player.speed * dt)
-            player.moving = true
-        end
-
-        if love.keyboard.isDown("a") then
-            player.x = player.x - (player.speed * dt)
-            player.moving = true
-            player.facing = "left"
-        end
-
-        if love.keyboard.isDown("s") then
-            player.y = player.y + (player.speed * dt)
-            player.moving = true
-        end
-
-        if love.keyboard.isDown("d") then
-            player.x = player.x + (player.speed * dt)
-            player.moving = true
-            player.facing = "right"
-        end
-
-        -- casting start button
-        if pressed("space") then
-            player.casting = true
-        end
-
-        -- return mark button
-        if love.keyboard.isDown("lctrl") then
-            player.mark.x = player.x
-            player.mark.y = player.y
-        end
-    else
-        -- check if a recipe has been matched
-        local did_cast = false
-        local spell_to_cast
-        for name, spell in pairs(spells) do
-            if cast_matches(player.cast_queue, spell.recipe) then
-                did_cast = true
-                spell_to_cast = spell
+    -- update player
+    if player.health > 0 then
+        if not player.casting then
+            -- TODO(bkaylor): moving diagonally shouldn't be faster than cardinally
+            -- handle movement buttons
+            player.moving = false
+            if love.keyboard.isDown("w") then
+                player.y = player.y - (player.speed * dt)
+                player.moving = true
             end
-        end
 
-        if did_cast then
-            -- handle the spell
-            spell_to_cast.procedure()
+            if love.keyboard.isDown("a") then
+                player.x = player.x - (player.speed * dt)
+                player.moving = true
+                player.facing = "left"
+            end
 
-            player.casting = false
-            player.cast_queue = {}
+            if love.keyboard.isDown("s") then
+                player.y = player.y + (player.speed * dt)
+                player.moving = true
+            end
 
+            if love.keyboard.isDown("d") then
+                player.x = player.x + (player.speed * dt)
+                player.moving = true
+                player.facing = "right"
+            end
+
+            -- casting start button
+            if pressed("space") then
+                player.casting = true
+            end
+
+            -- return mark button
+            if love.keyboard.isDown("lctrl") then
+                -- player.mark.x = player.x
+                -- player.mark.y = player.y
+                local vec = get_normalized_vector_between(player, player.mark)
+                player.mark.x = player.mark.x + vec.x * player.mark.speed * dt
+                player.mark.y = player.mark.y + vec.y * player.mark.speed * dt
+            end
         else
-            -- wait for the next button
-            local directions = {"up", "left", "right", "down"}
-            for _, direction in ipairs(directions) do
-                if pressed(direction) then
-                    table.insert(player.cast_queue, direction)
+            -- check if a recipe has been matched
+            local did_cast = false
+            local spell_to_cast
+            for name, spell in pairs(spells) do
+                if cast_matches(player.cast_queue, spell.recipe) then
+                    did_cast = true
+                    spell_to_cast = spell
                 end
             end
 
-            -- or for a cancel
-            if pressed("space") then
+            if did_cast then
+                -- handle the spell
+                spell_to_cast.procedure()
+
                 player.casting = false
                 player.cast_queue = {}
+
+            else
+                -- wait for the next button
+                local directions = {"up", "left", "right", "down"}
+                for _, direction in ipairs(directions) do
+                    if pressed(direction) then
+                        table.insert(player.cast_queue, direction)
+                    end
+                end
+
+                -- or for a cancel
+                if pressed("space") then
+                    player.casting = false
+                    player.cast_queue = {}
+                end
             end
         end
     end
@@ -1020,7 +1039,7 @@ function love.update(dt)
                 gate.timer = gate.timer - dt
                 if gate.timer <= 0 then
                     -- TODO(bkaylor): instead of removing, change to become a projectile modifier
-                    if gate.type == normal then
+                    if gate.type == "normal" then
                         increase_score()
                         table.remove(gates, i)
                     else
@@ -1094,8 +1113,7 @@ function love.update(dt)
                 enemy.x, enemy.y = player.mark.x, player.mark.y
                 player.shielded = false
             else
-                -- TODO(bkaylor): reset screen (or health?) instead of insta-restart
-                restart()
+                player_hit()
             end
         end
     end
@@ -1107,15 +1125,13 @@ function love.update(dt)
                 projectile.x, projectile.y = player.mark.x, player.mark.y
                 player.shielded = false
             else
-                -- TODO(bkaylor): reset screen (or health?) instead of insta-restart
-                restart()
+                player_hit()
             end
         end
     end
 
     -- spawn enemy or gate every some seconds
     -- TODO(bkaylor): more events? more interesting groupings of events?
-    --                what if spawned encounters instead of individual things?
     local freq = 5
     if (love.timer.getTime() - state.last_spawn_time) > freq then
         spawn_gameplay_event()
@@ -1131,26 +1147,30 @@ function love.update(dt)
     end
 
     -- set player animation state
-    if player.casting then
-        if player.animation.state == "player_cast" then
-            player.animation.progress = player.animation.progress + dt;
-        else
-            player.animation.state = "player_cast"
-            player.animation.progress = 0
-        end
-    elseif player.moving then
-        if player.animation.state == "player_walk" then
-            player.animation.progress = player.animation.progress + dt;
-        else
-            player.animation.state = "player_walk"
-            player.animation.progress = 0
-        end
+    if player.health < 1 then
+        player.animation.state = "player_death"
     else
-        if player.animation.state == "player_idle" then
-            player.animation.progress = player.animation.progress + dt;
+        if player.casting then
+            if player.animation.state == "player_cast" then
+                player.animation.progress = player.animation.progress + dt;
+            else
+                player.animation.state = "player_cast"
+                player.animation.progress = 0
+            end
+        elseif player.moving then
+            if player.animation.state == "player_walk" then
+                player.animation.progress = player.animation.progress + dt;
+            else
+                player.animation.state = "player_walk"
+                player.animation.progress = 0
+            end
         else
-            player.animation.state = "player_idle"
-            player.animation.progress = 0
+            if player.animation.state == "player_idle" then
+                player.animation.progress = player.animation.progress + dt;
+            else
+                player.animation.state = "player_idle"
+                player.animation.progress = 0
+            end
         end
     end
 end
@@ -1255,8 +1275,15 @@ function love.draw()
 
     -- draw player
     local animation = sprites[player.animation.state]
-    local index = (math.floor(player.animation.progress*12) % animation.count) + 1
-    local quad = animation.quads[index]
+
+    local index = 0
+    local quad = {}
+    if animation.type == "sprite" then
+        quad = animation.quad
+    else
+        index = (math.floor(player.animation.progress*12) % animation.count) + 1
+        quad = animation.quads[index]
+    end
 
     local flip = false
     if player.facing == "left" then
@@ -1399,6 +1426,10 @@ function love.draw()
         -- shield
         -- push
         -- pull
+    end
+
+    if player.health <= 0 then
+        love.graphics.print("R to Restart", state.score_font, state.width/2, state.height/2)
     end
 end
 
